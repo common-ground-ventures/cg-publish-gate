@@ -40,7 +40,13 @@ jobs:
 
 Then add the repo to `gate/consumers.yaml` in cg-facts so the publish step
 gives it the gate bundle secret, and require the `gate / cg-facts gate` check
-on `main`.
+on `main` with the ruleset in this repo:
+
+```
+gh api -X POST repos/common-ground-ventures/<site repo>/rulesets --input require-gate.json
+```
+
+Org admins keep a bypass, so Jesse can always override.
 
 ## Known findings
 
