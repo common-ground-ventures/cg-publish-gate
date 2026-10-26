@@ -201,6 +201,19 @@ def scan_text(rel, text, offsets, rules, approved, threshold):
                 add("WALL-WORD", m.start(), m.end(), "[walled word]",
                     "Walled personal name on a public page.")
 
+    if rules.get("wiped_name_hashes"):
+        by_len = {}
+        for e in rules["wiped_name_hashes"]:
+            by_len.setdefault(e["words"], set()).add(e["hash"])
+        toks = list(re.finditer(r"[^\W\d_]+", text))
+        for n, hashes in by_len.items():
+            for i in range(len(toks) - n + 1):
+                key = " ".join(t.group(0).lower() for t in toks[i:i + n])
+                if hashlib.sha256(("cg-facts-wiped:" + key).encode()).hexdigest() in hashes:
+                    add("WIPED-PERSON", toks[i].start(), toks[i + n - 1].end(),
+                        text[toks[i].start():toks[i + n - 1].end()],
+                        "Names a person wiped from cg-facts. Remove every mention and link.")
+
     for m in DOLLAR.finditer(text):
         val = dollar_value(m)
         if val < threshold:
