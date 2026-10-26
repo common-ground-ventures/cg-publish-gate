@@ -1,0 +1,90 @@
+name: cg-facts publish gate
+
+# Reusable workflow. A Common Ground site repo calls it on every pull request
+# and on main. It builds the site, scans the rendered output against the
+# cg-facts gate bundle, and fails when the output prints a claim cg-facts does
+# not approve. With the check required on main, a failing PR cannot merge, so
+# Cloudflare Workers Builds never deploys it.
+#
+# The bundle (rules and approved figures) arrives as the org secret
+# CG_FACTS_GATE_BUNDLE, set by the cg-facts publish step. This repo holds only
+# the scanner; no fact, rule or ledger row lives here.
+
+on:
+  workflow_call:
+    inputs:
+      site-dir:
+        description: Folder that holds the rendered site after the build
+        type: string
+        default: "."
+      build-command:
+        description: Shell command that builds the site (empty = no build step)
+        type: string
+        default: ""
+      node-version:
+        description: Node version for the build (empty = no Node setup)
+        type: string
+        default: ""
+      baseline:
+        description: Known findings file in the site repo
+        type: string
+        default: cg-facts-baseline.json
+      gate-ref:
+        description: Ref of cg-publish-gate whose scanner runs
+        type: string
+        default: v1
+    secrets:
+      CG_FACTS_GATE_BUNDLE:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: cg-facts gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: common-ground-ventures/cg-publish-gate
+          ref: ${{ inputs.gate-ref }}
+          path: .cg-publish-gate
+          persist-credentials: false
+
+      - if: inputs.node-version != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Build
+        if: inputs.build-command != ''
+        env:
+          BUILD: ${{ inputs.build-command }}
+        run: bash -euo pipefail -c "$BUILD"
+
+      - name: Load the gate bundle
+        env:
+          BUNDLE: ${{ secrets.CG_FACTS_GATE_BUNDLE }}
+        run: |
+          if [ -z "$BUNDLE" ]; then
+            echo "::error title=cg-facts gate::No gate bundle. The repo needs the org secret CG_FACTS_GATE_BUNDLE (cg-facts gate/consumers.yaml) and the caller must pass secrets: inherit. Pull requests from forks never get it, so they fail closed."
+            exit 1
+          fi
+          printf '%s' "$BUNDLE" > "$RUNNER_TEMP/cg-facts-bundle.b64"
+
+      - name: Scan the rendered site
+        env:
+          SITE: ${{ inputs.site-dir }}
+          BASELINE: ${{ inputs.baseline }}
+        run: |
+          python3 .cg-publish-gate/scan_site.py \
+            --export "$RUNNER_TEMP/cg-facts-bundle.b64" \
+            --site "$SITE" \
+            --baseline "$BASELINE" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --json "$RUNNER_TEMP/cg-facts-gate.json"
